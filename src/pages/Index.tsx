@@ -1,10 +1,16 @@
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { VideoUpload } from '@/components/VideoUpload';
-import { SummaryDisplay } from '@/components/SummaryDisplay';
+import { ProcessingStepper, ProcessingStep } from '@/components/ProcessingStepper';
 import { Header } from '@/components/Header';
 import { FeatureSection } from '@/components/FeatureSection';
 import { HowItWorksSection } from '@/components/HowItWorksSection';
+import { Button } from '@/components/ui/button';
+import { uploadVideo, processYouTubeVideo } from '@/services/api.service';
+import { useToast } from '@/hooks/use-toast';
+import { useVideos } from '@/contexts/VideoContext';
+import { Library } from 'lucide-react';
 
 export interface VideoSummary {
   id: string;
@@ -13,82 +19,166 @@ export interface VideoSummary {
   duration?: string;
   processingTime?: string;
   videoUrl?: string;
+  transcript?: string;
 }
 
 const Index = () => {
-  const [currentSummary, setCurrentSummary] = useState<VideoSummary | null>(null);
+  const navigate = useNavigate();
+  const { addVideo } = useVideos();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState<ProcessingStep>('uploading');
+  const { toast } = useToast();
 
   const handleVideoProcess = async (videoData: { file?: File; youtubeUrl?: string }) => {
     console.log('Starting video processing...', videoData);
     setIsProcessing(true);
-    setCurrentSummary(null); // Clear any existing summary
-    
+    setProcessingStep('uploading');
+
+    // Advance steps automatically while API processes in background
+    const stepTimings: { step: ProcessingStep; delay: number }[] = [
+      { step: 'transcribing', delay: 3000 },
+      { step: 'analyzing', delay: 30000 },
+      { step: 'summarizing', delay: 55000 },
+      { step: 'extracting', delay: 75000 },
+    ];
+    const timers = stepTimings.map(({ step, delay }) =>
+      setTimeout(() => setProcessingStep(step), delay)
+    );
+
     try {
-      // Simulate processing with more realistic timing
-      console.log('Processing video...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      let result;
+
+      if (videoData.file) {
+        result = await uploadVideo(videoData.file);
+      } else if (videoData.youtubeUrl) {
+        result = await processYouTubeVideo(videoData.youtubeUrl);
+      } else {
+        throw new Error('No video file or YouTube URL provided');
+      }
+
+      timers.forEach(clearTimeout);
+      setProcessingStep('complete');
       
-      const mockSummary: VideoSummary = {
-        id: Date.now().toString(),
-        title: videoData.youtubeUrl 
-          ? `YouTube Video: ${videoData.youtubeUrl.split('v=')[1]?.substring(0, 8) || 'Unknown'}` 
-          : videoData.file?.name || "Uploaded Video",
-        summary: `This comprehensive video summary covers the main topics discussed in the content:\n\n• **Introduction and Context**: The video begins by establishing the primary subject matter and its relevance to current industry trends and viewer interests.\n\n• **Core Content Analysis**: The presenter provides detailed insights into the main topic, breaking down complex concepts into digestible segments for better understanding.\n\n• **Key Findings and Data**: Important statistics, research findings, and data points are presented to support the main arguments and provide evidence-based conclusions.\n\n• **Practical Applications**: The content includes real-world examples and practical tips that viewers can implement in their own projects or daily practices.\n\n• **Expert Perspectives**: Industry experts and thought leaders share their opinions and predictions about future developments in this field.\n\n• **Conclusion and Takeaways**: The video concludes with a summary of the most important points and actionable advice for viewers.\n\nThis summary provides a comprehensive overview of the video content, highlighting the most valuable insights and practical information shared throughout the presentation.`,
-        duration: videoData.youtubeUrl ? "12:45" : "8:30",
-        processingTime: "2.1s",
-        videoUrl: videoData.youtubeUrl
-      };
+      console.log('Processing completed successfully:', result);
       
-      console.log('Processing completed successfully:', mockSummary);
-      setCurrentSummary(mockSummary);
+      // Save video to context
+      addVideo({
+        id: result.id,
+        title: result.title,
+        type: videoData.youtubeUrl ? 'youtube' : 'file',
+        src: result.videoKey || result.videoUrl || videoData.youtubeUrl || '',
+        videoUrl: result.videoUrl,
+        duration: result.duration || '0:00',
+        summary: result.summary,
+        transcript: result.transcript || '',
+        transcriptSegments: result.transcriptSegments,
+        keyPoints: result.keyPoints,
+        processingTime: result.processingTime,
+        date: new Date(),
+        thumbnail: result.thumbnailUrl || '/placeholder.svg'
+      });
+      
+      toast({
+        title: "✅ Success!",
+        description: "Your video summary is ready.",
+      });
+      
+      // Navigate to workspace
+      setTimeout(() => {
+        navigate(`/workspace/${result.id}`);
+      }, 1000);
+      
     } catch (error) {
+      timers.forEach(clearTimeout);
       console.error('Processing failed:', error);
-      // You could add error handling here with a toast
-    } finally {
+      
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      
+      toast({
+        title: "❌ Processing failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+      
       setIsProcessing(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <Header />
+    <div className="min-h-screen animated-gradient relative overflow-hidden">
+      {/* Animated Background Particles */}
+      <div className="particle-bg absolute inset-0 z-0"></div>
       
-      <main className="container mx-auto px-4 py-12">
-        <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-6">
-            Video Summarizer
-          </h1>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
-            Transform any video into a concise, readable summary. Upload local files or paste YouTube links 
-            to get instant AI-powered summaries that you can copy and download.
-          </p>
-        </div>
-         <div className="mt-16 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl p-8 text-white text-center">
-        <h3 className="text-2xl font-bold mb-4">Ready to Get Started?</h3>
-        <p className="text-blue-100 mb-6 max-w-2xl mx-auto">
-          Upload your first video and experience the power of AI-driven content summarization
-        </p>
-        <button className="bg-white text-blue-600 px-8 py-3 rounded-lg font-semibold hover:bg-blue-50 transition-colors">
-          Try It Now
-        </button>
-      </div>
-        <div className="max-w-4xl mx-auto">
-          <VideoUpload 
-            onVideoProcess={handleVideoProcess}
-            isProcessing={isProcessing}
-          />
-          
-          {currentSummary && (
-            <div className="mt-12">
-              <SummaryDisplay summary={currentSummary} />
+      <div className="relative z-10">
+        <Header />
+        
+        <main className="container mx-auto px-4 py-12">
+          {/* Header Section with Animations */}
+          <div className="text-center mb-12 fade-in-up">
+            <div className="flex items-center justify-between max-w-3xl mx-auto mb-6">
+              <h1 className="text-6xl font-extrabold gradient-text-animated float-animation">
+                Video Summarizer
+              </h1>
+              <Button
+                variant="outline"
+                onClick={() => navigate('/library')}
+                className="gap-2 bg-white/90 hover:bg-white scale-hover border-2 border-indigo-400 text-indigo-700 hover:text-indigo-900 hover:border-indigo-500 transition-all duration-300 shadow-lg hover:shadow-xl font-semibold"
+              >
+                <Library className="w-4 h-4" />
+                My Library
+              </Button>
+            </div>
+            <p className="text-xl text-slate-700 max-w-3xl mx-auto leading-relaxed font-medium drop-shadow-sm">
+              Transform any video into a concise, readable summary. Upload local files or paste YouTube links 
+              to get instant AI-powered summaries that you can copy and download. ✨
+            </p>
+          </div>
+
+          {/* Processing Stepper or Upload Section */}
+          {isProcessing ? (
+            <div className="max-w-4xl mx-auto bounce-in">
+              <ProcessingStepper currentStep={processingStep} />
+            </div>
+          ) : (
+            <>
+              <div className="max-w-4xl mx-auto fade-in-up" style={{ animationDelay: '0.2s' }}>
+                <div className="glass rounded-3xl p-8 shadow-xl border border-white/40">
+                  <VideoUpload 
+                    onVideoProcess={handleVideoProcess}
+                    isProcessing={isProcessing}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-16 glass-dark rounded-3xl p-10 text-slate-800 text-center max-w-4xl mx-auto card-3d shadow-xl fade-in-up" style={{ animationDelay: '0.4s' }}>
+                <div className="relative">
+                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-6xl">
+                    🚀
+                  </div>
+                  <h3 className="text-3xl font-bold mb-4 mt-4 gradient-text-animated">
+                    Ready to Get Started?
+                  </h3>
+                  <p className="text-slate-600 mb-6 max-w-2xl mx-auto text-lg">
+                    Upload your first video and experience the power of AI-driven content summarization
+                  </p>
+                  <div className="flex gap-2 justify-center">
+                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {!isProcessing && (
+            <div className="fade-in-up" style={{ animationDelay: '0.6s' }}>
+              <HowItWorksSection />
+              <FeatureSection />
             </div>
           )}
-        </div>
-
-        <HowItWorksSection />
-        <FeatureSection />
-      </main>
+        </main>
+      </div>
     </div>
   );
 };
